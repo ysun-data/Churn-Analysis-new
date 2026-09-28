@@ -44,7 +44,7 @@ The shortlist identifies customers with higher observed churn risk. Whether an o
 
 ## Project Evolution
 
-The [first version of this project](LINK-TO-R-VERSION), built in R, compared six classifiers and found that logistic regression performed nearly as well as boosting. It also explored churn patterns, SHAP explanations, and thresholds under assumed misclassification costs.
+The [first version of this project](https://github.com/ysun-data/Telecom-Churn-Analysis), built in R, compared six classifiers and found that logistic regression performed nearly as well as boosting. It also explored churn patterns, SHAP explanations, and thresholds under assumed misclassification costs.
 
 That gave me a useful baseline, and a few questions I wanted to revisit:
 
@@ -178,77 +178,124 @@ Test results closely match cross-validation, so the model selection above genera
 
 ## What Drives Churn
 
-Logistic regression coefficients and gradient boosting SHAP values were computed independently. **Every one of the top nine SHAP features has the same direction in logistic regression, and all are statistically significant (p < 0.01).**
+I looked at churn drivers from two angles that share no machinery: SHAP values from gradient boosting, and odds ratios from logistic regression. They agree. Every one of boosting's top nine features points the same direction in logistic regression, and all are significant at p < 0.01. When a tree model and a linear model tell the same story independently, I trust the story a lot more.
 
-| Factor | Odds ratio (LR) | Direction |
-|---|---|---|
-| Two-year contract (vs. month-to-month) | 0.25 | Protective |
-| No internet service (vs. DSL) | 0.44 | Protective |
-| One-year contract (vs. month-to-month) | 0.52 | Protective |
-| Online security | 0.67 | Protective |
-| Tech support | 0.70 | Protective |
-| Each additional month of tenure | 0.97 | Protective |
-| Electronic check (vs. bank transfer) | 1.39 | Risk |
-| Fiber optic (vs. DSL) | 2.52 | Risk |
+<img width="800" height="550" alt="SHAP summary" src="https://github.com/user-attachments/assets/80b1f974-c154-4249-bea5-3c6cec2bc104" />
 
-![SHAP summary](figures/shap_beeswarm.png)
+*How to read it: each row is a feature, ranked by importance. Red means the feature is high (or "Yes"). Dots right of zero push churn risk up; dots left of zero push it down.*
 
-A few details worth noting:
+| SHAP rank | Factor | Odds ratio (LR) | Direction |
+|---|---|---|---|
+| 1 | Tenure (per additional month) | 0.97 | Protective |
+| 2 | Two-year contract (vs. month-to-month) | 0.25 | Protective |
+| 3 | Fiber optic (vs. DSL) | 2.52 | Risk |
+| 4 | No internet service (vs. DSL) | 0.44 | Protective |
+| 5 | One-year contract (vs. month-to-month) | 0.52 | Protective |
+| 6 | Streaming movies | 1.44 | Risk |
+| 7 | Electronic check (vs. bank transfer) | 1.39 | Risk |
+| 8 | Paperless billing | 1.33 | Risk |
+| 9 | Online security | 0.67 | Protective |
 
-- **Tenure's effect is strongly nonlinear.** Logistic regression assumes a constant 3% drop in odds per month. SHAP shows risk is highest in the first month, falls steeply through month six, stays elevated until around month 17, and then becomes protective. This is the pattern logistic regression cannot fit, and it explains boosting's edge.
+<details>
+<summary><b>Why two versions of logistic regression?</b></summary>
 
-![Tenure SHAP dependence](figures/shap_tenure.png)
+The model used for prediction is L2-regularized on standardized features, which helps it generalize. For this table, I refit the same features without regularization: penalized coefficients are shrunk toward zero and don't come with valid p-values, and unscaled features give effects in units a business can use, like "per month of tenure." Because the regularization was light, both versions produced nearly identical coefficients, so this table describes essentially the same model evaluated above.
 
-- **Not all add-on services behave the same.** Online security and tech support are significant protective factors; online backup and device protection are not.
-- **Only electronic check stands out among payment methods.** Mailed check, also a manual method, is not significantly different from automatic bank transfer, so the pattern isn't simply manual vs. automatic payment.
-- **Streaming services carry some pricing information.** With monthly charges removed, part of the price signal shifts onto the service indicators. Streaming's positive association with churn should be read with that in mind.
-- **Demographics matter little.** Gender, partner status, and dependents were not significant, which points retention efforts toward contracts, services, and early tenure.
+</details>
 
-These are associations, not causal effects. For example, part of the two-year contract effect likely reflects that customers who already plan to stay are the ones who sign long contracts.
+### 1. Tenure: the first six months decide a lot
 
+<img width="600" height="500" alt="Tenure SHAP dependence" src="https://github.com/user-attachments/assets/df5f4616-4305-4398-a9cc-52e5e639347a" />
+
+Logistic regression assumes tenure lowers churn odds by a steady ~3% per month. The SHAP curve says otherwise: risk peaks in the first month, drops steeply through month six, stays above neutral until around month 17, and only then turns protective. That curve is what boosting captures and logistic regression can't, and it's why boosting ranks the newest, riskiest customers more precisely at the top of the list.
+
+For a retention team, this makes timing as important as targeting. An offer to a three-year customer is mostly wasted. The window that matters is the first few months, so I'd schedule the first check-in in month one or two and put any contract-upgrade offer before month six.
+
+### 2. Contracts: the strongest lever the business controls
+
+Two-year customers have about a quarter of the churn odds of month-to-month customers; one-year customers about half. Some of that is selection, since customers who already plan to stay are the ones who sign long contracts. Still, contract type is one of the few drivers the company directly controls. Combined with the tenure finding, it points to a clear test: offer early-tenure, month-to-month customers an incentive to switch to an annual plan, and measure whether retention actually improves.
+
+### 3. Fiber: price or product?
+
+Fiber customers have about 2.5 times the churn odds of DSL customers, the largest risk factor in the model. The obvious question is whether they leave because fiber costs more or because the service disappoints. This dataset can't separate the two, since monthly charges is almost entirely determined by the service bundle (see [Data Decisions](#data-decisions-understanding-the-customer-behind-the-row)). But when the premium product has the least loyal customers, that's worth investigating with network-quality or complaint data.
+
+### Smaller patterns worth a second look
+
+- **Support beats storage.** Online security and tech support are protective; online backup and device protection aren't. My read: services that give customers help when something goes wrong build more attachment than services that just store things. A free tech-support trial for new fiber customers would be a cheap way to test that.
+- **The electronic-check puzzle.** Only electronic check stands out among payment methods. Mailed check is also manual but isn't riskier than automatic bank transfer, so this isn't simply "autopay vs. manual." Payment failure rates would be the first thing I'd check.
+- **Streaming partly stands in for price.** With monthly charges removed, some of the price signal shifts onto the service indicators, so streaming's link to churn is likely part price, part product.
+- **Demographics barely matter.** Gender, partner status, and dependents weren't significant. That's good news: the drivers that do matter are ones the business can act on.
 ---
 
 ## Evaluating the Customer List
 
-### Fixed outreach capacity
+### Fixed Outreach Capacity
 
-If the team can contact only the top k% of customers by predicted risk:
+A small improvement in AUC does not tell an outreach team how many more at-risk customers it can reach. To make the comparison concrete, I ranked test customers by predicted risk and evaluated four illustrative contact budgets.
 
-| Capacity | Contacted | LR churners found | GBM churners found | GBM precision | Share of all churners found | Lift vs. random |
+| Capacity | Customers selected | LR churners found | GBM churners found | GBM precision | GBM share of all churners found | GBM lift vs. random |
 |---|---|---|---|---|---|---|
-| Top 5% | 106 | 85 | **93** | 0.88 | 17% | 3.3× |
-| Top 10% | 212 | 158 | **162** | 0.76 | 29% | 2.9× |
-| Top 20% | 423 | 288 | 287 | 0.68 | 51% | 2.6× |
-| Top 30% | 634 | 374 | 374 | 0.59 | 67% | 2.2× |
+| Top 5% | 106 | 85 | **93** | 88% | 17% | 3.3× |
+| Top 10% | 212 | 158 | **162** | 76% | 29% | 2.9× |
+| Top 20% | 423 | 288 | 287 | 68% | 51% | 2.6× |
+| Top 30% | 634 | 374 | 374 | 59% | 67% | 2.2× |
 
-- **The riskiest customers are identified most precisely.** Lift falls from 3.3× at 5% to 2.2× at 30%.
-- **Boosting only helps at the very top.** Its advantage is 8 churners at 5% capacity and disappears by 20%. This fits the tenure finding: logistic regression's straight-line fit underestimates the risk of the newest customers, who dominate the top of the list.
-- **Model choice depends on capacity.** For a small, focused campaign, boosting has a modest practical edge. For broader outreach, the two models are interchangeable, and logistic regression is simpler to explain.
+**The strongest concentration of churners was at the top of the list.** Among the 106 customers selected by GBM at 5% capacity, 93 actually churned—a precision of 88%, compared with the test-set churn rate of about 26.5%.
 
-### An illustrative cost scenario
+**Boosting's advantage was concentrated at smaller contact budgets.** It identified eight more churners than LR at 5% capacity and four more at 10%. At 20–30%, the two models covered almost the same number of churners, though not necessarily the same customers.
 
-Under the standard cost-sensitive decision rule, a customer is worth contacting when the expected cost of missing a churner exceeds the cost of an unnecessary contact. Assuming a missed churner costs **10×** an unnecessary contact, the threshold is 1/11 ≈ **0.09**, compared with the default of 0.5.
+**The operating constraint changes the model discussion.** For a tightly focused campaign, GBM produced the stronger shortlist in this test sample. For broader outreach, coverage was similar, giving more weight to simplicity and ease of explanation.
 
-| Model | Threshold | Recall | Precision | Total cost |
+These lists measure risk-screening performance. Identifying a likely churner does not establish that contacting them will prevent churn.
+
+### An Illustrative Cost Scenario
+
+A fixed contact budget is one way to set the operating point. Another is to assign different costs to classification errors.
+
+I used a simple scenario:
+
+- A missed churner costs **10 units**.
+- A false alarm costs **1 unit**.
+- Correct classifications have zero cost.
+
+If predicted probabilities are calibrated, the theoretical threshold is:
+
+$$
+t = \frac{1}{10 + 1} \approx 0.091
+$$
+
+| Model | Threshold | Recall | Precision | Classification cost units |
 |---|---|---|---|---|
-| LR | 0.50 | 0.53 | 0.67 | 2,796 |
-| LR | 0.09 | 0.94 | 0.39 | 1,163 |
-| GBM | 0.50 | 0.50 | 0.70 | 2,932 |
-| GBM | 0.09 | 0.95 | 0.39 | 1,131 |
+| LR | 0.50 | 53% | 67% | 2,796 |
+| LR | 0.091 | 94% | 39% | 1,163 |
+| GBM | 0.50 | 50% | 70% | 2,932 |
+| GBM | 0.091 | 95% | 39% | 1,131 |
 
-Moving from the default threshold cuts total cost by about 60% and finds nearly every churner. But it means contacting about **64% of all customers**, which few retention teams could do. Compared with the capacity view, going from 30% to 64% outreach more than doubles the contacts to find about a quarter more churners.
+*Cost = 10 × false negatives + false positives. The original $200/$20 scenario gives the same threshold; dollar totals would be 20 times the values above.*
 
-This rule assumes reasonably calibrated probabilities, and the result is sensitive to the assumed cost ratio. It is included to show the trade-off, not as a recommended policy.
+Lowering the threshold reduced the assumed classification cost by about **60%** and captured approximately **94–95% of actual churners**. The trade-off was workload: roughly **64% of all customers** were flagged.
+
+For GBM, moving from the top 30% list to this lower threshold increased the selected group from **634 to 1,351 customers**, identifying **156 additional churners**.
+
+The practical question becomes: is that additional coverage worth more than doubling the outreach volume?
+
+This is a classification-cost illustration, not an estimate of retention profit. Probability calibration has not yet been assessed, and the scenario does not model whether outreach works or the full cost of delivering it.
 
 ---
 
 ## Limitations and Next Steps
 
-- **Risk is not persuadability.** The model predicts who is likely to leave, not who would stay if contacted. Some high-risk customers may leave regardless, and some low-risk customers might react badly to outreach. The next step is a randomized retention experiment within risk tiers, measuring incremental retention by tier, which could later support an uplift model.
-- **Associations, not causes.** Contract, payment, and service effects are observational and may reflect who selects into each option.
-- **No time-based validation.** This is a single snapshot, so the model could not be validated on future customers. A production version should train on past periods and test on later ones.
-- **Customer value is not considered.** All churners are weighted equally. Ranking by expected revenue at risk (churn probability × monthly charges × a time horizon) may produce a different priority list.
-- **Cost assumptions need business input.** The cost ratio used above is illustrative and would need to be grounded in real offer costs and customer lifetime value.
+- **Risk is not persuadability.** A high-risk customer is not necessarily one who can be retained. The next step would be a randomized retention experiment within risk tiers, comparing an intervention with a control group and measuring incremental retention and net value. With enough experimental data, this could support uplift modeling.
+
+- **Associations are not intervention effects.** Contract, payment, and service patterns may partly reflect the customers who choose those options. Changing the option may not produce the difference observed in the data.
+
+- **Validation is based on a single snapshot.** The random holdout evaluates customers from the same dataset, not a future period. A production version would need timestamped features available before the outcome, a defined prediction window, and validation on later periods.
+
+- **Probability quality needs a separate check.** ROC-AUC, AP, and top-k metrics assess ranking. Calibration should be evaluated before treating scores as absolute churn probabilities or using probability-based cost rules.
+
+- **Customer value is not included.** The current ranking prioritizes churn risk equally across customers. A future version could incorporate expected customer value, intervention costs, and estimated intervention effectiveness. Monthly charges alone are not a measure of lifetime value or profit.
+
+- **Operational assumptions are illustrative.** Contact budgets and the 10:1 error-cost ratio were chosen to explore trade-offs. A deployment decision would require actual team capacity, contact eligibility, costs, and business objectives.
 
 ---
 
